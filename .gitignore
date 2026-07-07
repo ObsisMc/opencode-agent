@@ -1,0 +1,176 @@
+### OS ###
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+### Editors / IDE ###
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+*~
+.history/
+
+### Environment / Secrets ###
+.env
+.env.*
+!.env.example
+!.env.sample
+*.pem
+*.key
+*.cert
+secrets/
+credentials/
+
+### Logs ###
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+### Node / Frontend (React, Vue, Next, Vite, etc.) ###
+node_modules/
+.pnp
+.pnp.js
+dist/
+build/
+out/
+.next/
+.nuxt/
+.output/
+.cache/
+.parcel-cache/
+.turbo/
+.vercel/
+.svelte-kit/
+coverage/
+*.tsbuildinfo
+.eslintcache
+.stylelintcache
+
+### Package managers ###
+.npm
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/sdks
+!.yarn/versions
+.pnpm-store/
+
+### Python / Backend ###
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+env.bak/
+venv.bak/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+.installed.cfg
+*.egg
+pip-log.txt
+pip-delete-this-directory.txt
+
+### Java / Kotlin / Gradle / Maven ###
+target/
+*.class
+*.jar
+.gradle/
+build/
+
+### Go ###
+*.exe
+*.exe~
+*.dll
+*.test
+*.out
+vendor/
+
+### Rust ###
+target/
+Cargo.lock
+
+### Database ###
+*.sqlite
+*.sqlite3
+*.db
+
+### AI / ML related ###
+# Model weights & checkpoints
+*.ckpt
+*.pt
+*.pth
+*.onnx
+*.h5
+*.safetensors
+*.bin
+*.gguf
+*.pkl
+*.pickle
+checkpoints/
+models/
+weights/
+
+# Datasets
+data/
+datasets/
+*.csv
+*.tsv
+*.parquet
+!sample_data.csv
+
+# Experiment tracking / caches
+wandb/
+mlruns/
+.mlflow/
+.cache/
+lightning_logs/
+
+# Vector stores / embeddings
+*.index
+*.faiss
+chroma/
+.chroma/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# LLM / agent tool caches
+.aider*
+.claude/settings.local.json
+.cursor/
+.continue/
+
+### Docker ###
+*.pid
+.docker/
+
+### Misc ###
+*.bak
+*.tmp
+*.temp
+.tmp/
+.temp/
+
+
+.claude
+.gemini
+.codex
+.opencode
