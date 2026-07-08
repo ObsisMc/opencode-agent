@@ -51,6 +51,35 @@ Zed's `~/.config/zed/settings.json`:
 }
 ```
 
+## Manually testing with the MVP ACP client
+
+```bash
+bun run client
+```
+
+`scripts/acp-client.ts` is a small interactive REPL that acts as a real ACP
+*client* — it spawns this plugin's built relay exactly as a real client
+would, completes `initialize`, and implements just enough client-side ACP
+surface (real file read/write, a real terminal backed by `Bun.spawn`,
+auto-approved permission requests) for OpenCode to actually do agentic work
+through the relay, not just answer `initialize`. It streams `session/update`
+text chunks straight to your terminal.
+
+Commands once it's running:
+
+```
+new [cwd]                       # session/new (defaults cwd to this project)
+list                            # session/list
+prompt <sessionId> <text...>    # session/prompt
+cancel <sessionId>              # session/cancel
+close <sessionId>               # session/close
+quit
+```
+
+This is a dev/testing tool, not part of the plugin's own runtime surface —
+`elicitation/create` isn't implemented (returns an error) since it's rare and
+still unstable in the ACP spec.
+
 ## Testing
 
 ```bash
