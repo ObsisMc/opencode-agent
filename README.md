@@ -80,6 +80,34 @@ This is a dev/testing tool, not part of the plugin's own runtime surface —
 `elicitation/create` isn't implemented (returns an error) since it's rare and
 still unstable in the ACP spec.
 
+### Starting a chat
+
+```
+acp> new
+{
+  "sessionId": "ses_xxxxxxxx",
+  ...
+}
+acp> prompt ses_xxxxxxxx 你好，帮我看看这个项目结构
+```
+
+`new` creates a session (defaults `cwd` to this project); note the
+`sessionId` it returns. `prompt <sessionId> <text...>` sends a message on
+that session — OpenCode's reply streams straight to your terminal as
+`session/update` text chunks arrive. Keep sending `prompt` on the same
+`sessionId` to continue the conversation; OpenCode manages the conversation
+history itself.
+
+A couple of things that can trip this up, unrelated to the relay itself:
+
+- If OpenCode has no LLM provider configured, `prompt` will fail with an
+  auth-related error. Run `bunx opencode auth login` from this project's
+  directory (it uses the same pinned, local `opencode` binary) to configure
+  one.
+- Tool calls (file reads/writes, running commands) are auto-approved by the
+  test client and actually executed for real — don't point `new`'s `cwd` at
+  anything you don't want touched.
+
 ## Testing
 
 ```bash
