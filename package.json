@@ -1,0 +1,23 @@
+{
+  "name": "opencode-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "ACP relay plugin that presents OpenCode (`opencode acp`) as a spawnable ACP agent",
+  "main": "src/index.ts",
+  "scripts": {
+    "build": "bun build src/index.ts --target bun --outfile dist/index.js",
+    "start": "bun run build && bun run dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@agentclientprotocol/sdk": "1.2.0",
+    "opencode-ai": "1.17.14",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.0",
+    "typescript": "^5.7.0"
+  }
+}
