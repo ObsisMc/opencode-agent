@@ -1,27 +1,27 @@
 {
   "repo": "anomalyco/opencode",
-  "tag": "v1.19.0",
-  "publishedAt": "2026-10-11T01:39:22Z",
+  "tag": "v1.19.1",
+  "publishedAt": "2026-10-15T19:19:45Z",
   "assets": {
     "aarch64-apple-darwin": {
       "name": "opencode-darwin-arm64.zip",
-      "size": 45555805,
-      "sha256": "0d5f511948d6fbfedf9bb16753c0ac42613dcc8de75d9deb7e8d0cf584c8fba6"
+      "size": 45581810,
+      "sha256": "c9c4b7833a2cb0a0b676031d8b688012b5025bc55a890e2acd4412cb04d19b02"
     },
     "x86_64-unknown-linux-gnu": {
       "name": "opencode-linux-x64.tar.gz",
-      "size": 60685698,
-      "sha256": "7bb9e61ad6feacf2e89c10a6a2c1840e3de4220bb50ba1fc7110f31806076aec"
+      "size": 60707458,
+      "sha256": "6f1904b860bdbd32e90e679c9e1b0e64e78269a353e1497d5ea792dfa449538c"
     },
     "aarch64-unknown-linux-gnu": {
       "name": "opencode-linux-arm64.tar.gz",
-      "size": 60493623,
-      "sha256": "e9841d43d3e1a8f36ed2691592d3b8b4fb097e606c8b559a277a1b845840e26b"
+      "size": 60526393,
+      "sha256": "3840e9afb2462a666d31816b20bc13b91af9845c329cff660a972aa9cfaee3a2"
     },
     "x86_64-pc-windows-msvc": {
       "name": "opencode-windows-x64.zip",
-      "size": 62173956,
-      "sha256": "17108e9448c4fdad48eb8714c4ed6f5dfc9cf86c2eb8f2ce5d02043fef806eb5"
+      "size": 62201377,
+      "sha256": "efcbef1dc5265f468f43e607ea3c5729026e0a0a4e8f1d7552e97ac3acd3c7f4"
     }
   }
 }
