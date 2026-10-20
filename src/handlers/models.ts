@@ -122,7 +122,7 @@ async function discoverModels(
   // Resolution failures — no CLI on PATH, a bundled one that cannot run — are raised here as the
   // classified errors Ora acts on, before any probe exists to blur them into a timeout.
   const child = await spawnOpenCode(processes, {
-    args: ["acp", "--cwd", cwd],
+    args: ["acp"],
     cwd,
   });
   const probe = AcpProbe.attach(child);
