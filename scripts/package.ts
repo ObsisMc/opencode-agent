@@ -10,10 +10,21 @@
  *
  * Usage:
  *   deno task package --tag v1.2.3 --repo owner/name
+ *   deno task package --tag v1.2.3 --repo owner/name --agent-configuration
+ *                                            # also ship and bind the Agent declaration
  *
  * Produces `dist/packages/<identifier>-<tag>-<triple>.orax` plus `dist/manifest.toml`, the release
  * form of the manifest the marketplace index needs. `gh` is the only external tool required:
  * archives are read and written in-process so a maintainer can run this anywhere CI can.
+ *
+ * `--agent-configuration` is the publish-order switch for the Agent declaration
+ * (`assets/config.json`): with it, every package carries the declaration, the release manifest
+ * gains an `[agent_configuration]` section binding its digest, and `dist/agent-configuration.json`
+ * — the static copy the marketplace reads beside the entry — is written. Without it, packages
+ * carry no declaration and current Ora hosts install the release exactly as before. An
+ * `agent`-kind package whose declaration a host cannot compile installs but then refuses to
+ * activate, so the switch is flipped only once the hosts that resolve it are deployed — an owner
+ * decision made by editing one line of the release workflow, not something this script detects.
  */
 import { parseArgs } from "@std/cli/parse-args";
 import { basename, dirname, join, relative } from "@std/path";
@@ -75,6 +86,15 @@ const DIST = "dist";
 const PACKAGES_DIR = join(DIST, "packages");
 const DOWNLOAD_DIR = join(DIST, "download");
 const STAGE_DIR = join(DIST, "stage");
+
+/** Package-relative path of the Agent declaration a release carries when it binds one. */
+const DECLARATION_ENTRY = "assets/config.json";
+
+/** The static copy's name, both as a release asset and inside a marketplace registry entry. */
+const DECLARATION_COPY = "agent-configuration.json";
+
+/** The declaration size bound the host's compiler enforces; a larger file could never install. */
+const MAX_DECLARATION_BYTES = 256 * 1024;
 
 /** Runs one command, failing loudly rather than letting a broken package be published. */
 async function run(command: string, ...args: string[]): Promise<string> {
@@ -212,10 +232,12 @@ function relativeSlashPath(root: string, path: string): string {
 
 /** Returns the lowercase hex SHA-256 of one file, the spelling `sha256` takes in a manifest. */
 async function sha256Hex(path: string): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    await Deno.readFile(path),
-  );
+  return sha256Bytes(await Deno.readFile(path));
+}
+
+/** Returns the lowercase hex SHA-256 of exact bytes. */
+async function sha256Bytes(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
   return Array.from(new Uint8Array(digest))
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
@@ -245,12 +267,22 @@ async function findLogoFiles(): Promise<string[]> {
  * verify after extraction that the package it downloaded is really the one built for this machine.
  * A universal package declares none: it carries no binary whose host compatibility could be wrong,
  * and an `[artifact]` section on it would make Ora check the one thing it cannot promise.
+ * `includeDeclaration` is the `--agent-configuration` switch described at the top of this file.
  */
-async function stagePluginFiles(target: string | undefined): Promise<void> {
+async function stagePluginFiles(
+  target: string | undefined,
+  includeDeclaration: boolean,
+): Promise<void> {
   await Deno.mkdir(STAGE_DIR, { recursive: true });
   await Deno.copyFile(join(DIST, "main.js"), join(STAGE_DIR, "main.js"));
   for (const extra of [...await findLogoFiles(), "README.md"]) {
     await Deno.copyFile(extra, join(STAGE_DIR, extra)).catch(() => {});
+  }
+  if (includeDeclaration) {
+    await Deno.mkdir(dirname(join(STAGE_DIR, DECLARATION_ENTRY)), {
+      recursive: true,
+    });
+    await Deno.copyFile(DECLARATION_ENTRY, join(STAGE_DIR, DECLARATION_ENTRY));
   }
   const manifest = (await Deno.readTextFile("orax.toml")).trimEnd();
   const artifact = target === undefined
@@ -269,6 +301,7 @@ async function buildBundledPackage(
   upstreamTag: string,
   expectedSha256: string,
   fileName: string,
+  includeDeclaration: boolean,
 ): Promise<void> {
   await Deno.remove(STAGE_DIR, { recursive: true }).catch(() => {});
   const staged = join(STAGE_DIR, plan.binaryPath);
@@ -301,16 +334,19 @@ async function buildBundledPackage(
   // package uses for it.
   await extractEntry(archive, basename(plan.binaryPath), staged);
 
-  await stagePluginFiles(plan.triple);
+  await stagePluginFiles(plan.triple, includeDeclaration);
   await writeOrax(STAGE_DIR, join(PACKAGES_DIR, fileName), plan.binaryPath);
   await Deno.remove(STAGE_DIR, { recursive: true });
   await Deno.remove(archive).catch(() => {});
 }
 
 /** Stages the one package every host can install, which runs the user's own CLI. */
-async function buildUniversalPackage(fileName: string): Promise<void> {
+async function buildUniversalPackage(
+  fileName: string,
+  includeDeclaration: boolean,
+): Promise<void> {
   await Deno.remove(STAGE_DIR, { recursive: true }).catch(() => {});
-  await stagePluginFiles(/*target*/ undefined);
+  await stagePluginFiles(/*target*/ undefined, includeDeclaration);
   await writeOrax(
     STAGE_DIR,
     join(PACKAGES_DIR, fileName),
@@ -320,7 +356,7 @@ async function buildUniversalPackage(fileName: string): Promise<void> {
 }
 
 /**
- * Builds every package this release publishes and returns the release-form manifest body.
+ * Builds every package this release publishes and returns where each one is downloaded from.
  *
  * The two shapes produce different release sources — one `[[targets]]` entry per bundled package,
  * or a single `url`/`sha256` pair — and Ora rejects a manifest carrying both, which is why the
@@ -330,17 +366,26 @@ async function buildRelease(
   identifier: string,
   tag: string,
   repo: string,
-): Promise<string> {
+  includeDeclaration: boolean,
+): Promise<{ source: ReleaseSource; packages: string[] }> {
   const base = `https://github.com/${repo}/releases/download/${tag}`;
-  let manifest = (await Deno.readTextFile("orax.toml")).trimEnd();
 
   if (config.cli === "user_installed") {
     const fileName = `${identifier}-${tag}.orax`;
-    await buildUniversalPackage(fileName);
-    const digest = await sha256Hex(join(PACKAGES_DIR, fileName));
+    await buildUniversalPackage(fileName, includeDeclaration);
+    const path = join(PACKAGES_DIR, fileName);
     console.log(`packaged ${fileName} (no bundled CLI)`);
-    return `${manifest}\n\nurl = "${base}/${fileName}"\nsha256 = "${digest}"`;
+    return {
+      source: {
+        kind: "universal",
+        url: `${base}/${fileName}`,
+        sha256: await sha256Hex(path),
+      },
+      packages: [path],
+    };
   }
+  const targets: ReleaseTarget[] = [];
+  const packages: string[] = [];
 
   await Deno.mkdir(DOWNLOAD_DIR, { recursive: true });
   // Read, never resolved here: `deno task sync` is the only thing allowed to ask GitHub what
@@ -374,20 +419,183 @@ async function buildRelease(
       lock.tag,
       pinned.sha256,
       fileName,
+      includeDeclaration,
     );
 
-    const digest = await sha256Hex(join(PACKAGES_DIR, fileName));
-    manifest +=
-      `\n\n[[targets]]\ntarget = "${triple}"\nurl = "${base}/${fileName}"\nsha256 = "${digest}"`;
+    const path = join(PACKAGES_DIR, fileName);
+    targets.push({
+      triple,
+      url: `${base}/${fileName}`,
+      sha256: await sha256Hex(path),
+    });
+    packages.push(path);
     console.log(`packaged ${fileName}`);
   }
   await Deno.remove(DOWNLOAD_DIR, { recursive: true }).catch(() => {});
   console.log(`\nUpstream CLI: ${lock.tag}`);
-  return manifest;
+  return { source: { kind: "targets", targets }, packages };
+}
+
+/** One built per-target package, as the release form of the manifest advertises it. */
+export interface ReleaseTarget {
+  /** The canonical Rust triple this package installs on. */
+  triple: string;
+  url: string;
+  sha256: string;
+}
+
+/**
+ * Where a release's packages are downloaded from: one universal package, or one per target.
+ *
+ * Ora rejects a manifest carrying both, which is why a release is exactly one of the two.
+ */
+export type ReleaseSource =
+  | { kind: "universal"; url: string; sha256: string }
+  | { kind: "targets"; targets: ReleaseTarget[] };
+
+/** One release's verified Agent declaration, as the marketplace entry binds it. */
+export interface AgentConfigurationAssociation {
+  /** Declaration schema version the published copy declares. */
+  schemaVersion: number;
+  /** Lowercase hex SHA-256 of the exact declaration bytes every package of this release carries. */
+  declarationSha256: string;
+  /** Registry-entry-relative path of the static copy the marketplace sync reads. */
+  copy: string;
+}
+
+/**
+ * Renders the release form of the manifest, which is what a marketplace entry is copied from.
+ *
+ * TOML binds a bare key to the table header above it, so the order is load bearing: the installed
+ * manifest's own keys, then a universal package's top-level `url`/`sha256`, then the
+ * `[agent_configuration]` table when the release binds a declaration, then the `[[targets]]`
+ * blocks. A universal `url` written below a table would silently become part of that table.
+ */
+export function releaseManifest(
+  installed: string,
+  source: ReleaseSource,
+  agentConfiguration?: AgentConfigurationAssociation,
+): string {
+  const sections = [installed.trimEnd()];
+  if (source.kind === "universal") {
+    sections[0] += `\n\nurl = "${source.url}"\nsha256 = "${source.sha256}"`;
+  }
+  if (agentConfiguration !== undefined) {
+    sections.push(
+      `[agent_configuration]\nschema_version = ${agentConfiguration.schemaVersion}\n` +
+        `declaration_sha256 = "${agentConfiguration.declarationSha256}"\n` +
+        `copy = "${agentConfiguration.copy}"`,
+    );
+  }
+  if (source.kind === "targets") {
+    sections.push(
+      ...source.targets.map((target) =>
+        `[[targets]]\ntarget = "${target.triple}"\nurl = "${target.url}"\n` +
+        `sha256 = "${target.sha256}"`
+      ),
+    );
+  }
+  return `${sections.join("\n\n")}\n`;
+}
+
+/**
+ * Reads the declaration bytes back out of a built package, or `undefined` when it carries none.
+ *
+ * The release association is derived from what the archive actually carries, not from the file
+ * that was staged into it: reading the entry back is what proves the copy a marketplace will
+ * publish is byte-identical to the declaration every target installs.
+ */
+export async function packagedDeclaration(
+  archive: string,
+): Promise<Uint8Array<ArrayBuffer> | undefined> {
+  const zip = new ZipReader(new BlobReader(await openBlob(archive)));
+  try {
+    for (const entry of await zip.getEntries()) {
+      if (entry.filename === DECLARATION_ENTRY && !entry.directory) {
+        return new Uint8Array(await entry.arrayBuffer());
+      }
+    }
+    return undefined;
+  } finally {
+    await zip.close();
+  }
+}
+
+/**
+ * Builds the release association from the bytes the packages actually carry.
+ *
+ * The digest is over the exact bytes, so a reformatted declaration is a different release
+ * identity by construction. Only what this script owns is checked — readable UTF-8, a positive
+ * integer `schemaVersion` and the host's size bound; whether the declaration is legal is proven by
+ * the host compilers at marketplace sync and install, not re-implemented here.
+ */
+export async function declarationAssociation(
+  declaration: Uint8Array<ArrayBuffer>,
+): Promise<AgentConfigurationAssociation> {
+  if (declaration.byteLength > MAX_DECLARATION_BYTES) {
+    throw new Error(
+      `${DECLARATION_ENTRY} is ${declaration.byteLength} bytes, over the ` +
+        `${MAX_DECLARATION_BYTES}-byte bound every host enforces`,
+    );
+  }
+  const text = new TextDecoder("utf-8", { fatal: true }).decode(declaration);
+  const parsed = JSON.parse(text) as { schemaVersion?: unknown } | null;
+  if (
+    typeof parsed !== "object" || parsed === null ||
+    typeof parsed.schemaVersion !== "number" ||
+    !Number.isSafeInteger(parsed.schemaVersion) || parsed.schemaVersion < 1
+  ) {
+    throw new Error(
+      `${DECLARATION_ENTRY} declares no positive integer schemaVersion`,
+    );
+  }
+  return {
+    schemaVersion: parsed.schemaVersion,
+    declarationSha256: await sha256Bytes(declaration),
+    copy: DECLARATION_COPY,
+  };
+}
+
+/**
+ * Proves every package carries the same declaration, or none, and returns its association.
+ *
+ * A release binds exactly one declaration digest, so one package with different bytes — or one
+ * missing them — would install a declaration identity the manifest does not name.
+ */
+async function bindDeclaration(
+  packages: readonly string[],
+): Promise<AgentConfigurationAssociation> {
+  let bound: Uint8Array<ArrayBuffer> | undefined;
+  for (const archive of packages) {
+    const carried = await packagedDeclaration(archive);
+    if (carried === undefined) {
+      throw new Error(`${archive} carries no ${DECLARATION_ENTRY}`);
+    }
+    if (bound !== undefined && !bytesEqual(bound, carried)) {
+      throw new Error(
+        `${archive} carries different ${DECLARATION_ENTRY} bytes`,
+      );
+    }
+    bound = carried;
+  }
+  if (bound === undefined) {
+    throw new Error("the release built no package to bind a declaration to");
+  }
+  await Deno.writeFile(join(DIST, DECLARATION_COPY), bound);
+  return await declarationAssociation(bound);
+}
+
+/** Compares two byte sequences; `Uint8Array` has no equality of its own. */
+function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
+  return left.byteLength === right.byteLength &&
+    left.every((byte, index) => byte === right[index]);
 }
 
 async function main(): Promise<void> {
-  const flags = parseArgs(Deno.args, { string: ["tag", "repo"] });
+  const flags = parseArgs(Deno.args, {
+    string: ["tag", "repo"],
+    boolean: ["agent-configuration"],
+  });
   const tag = flags.tag ?? Deno.env.get("GITHUB_REF_NAME");
   const repo = flags.repo ?? Deno.env.get("GITHUB_REPOSITORY");
   if (tag === undefined || repo === undefined) {
@@ -397,12 +605,30 @@ async function main(): Promise<void> {
   const identifier = await manifestField("identifier");
   await Deno.mkdir(PACKAGES_DIR, { recursive: true });
 
-  const manifest = await buildRelease(identifier, tag, repo);
+  const includeDeclaration = flags["agent-configuration"];
+  // A stale copy from an earlier declaration-binding build must not be published by this one.
+  await Deno.remove(join(DIST, DECLARATION_COPY)).catch(() => {});
+  const { source, packages } = await buildRelease(
+    identifier,
+    tag,
+    repo,
+    includeDeclaration,
+  );
+  const association = includeDeclaration
+    ? await bindDeclaration(packages)
+    : undefined;
 
   // The marketplace index needs the release form of the manifest, which carries the download URLs
   // and digests. It is only knowable once the packages exist, so it is generated here rather than
   // committed.
-  await Deno.writeTextFile(join(DIST, "manifest.toml"), `${manifest}\n`);
+  await Deno.writeTextFile(
+    join(DIST, "manifest.toml"),
+    releaseManifest(
+      await Deno.readTextFile("orax.toml"),
+      source,
+      association,
+    ),
+  );
 }
 
 if (import.meta.main) {
