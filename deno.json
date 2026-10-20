@@ -20,7 +20,7 @@
     "dev": "deno run --no-prompt --allow-run --allow-read --allow-env --allow-net src/main.ts",
     "build": "deno bundle src/main.ts -o dist/main.js",
     "sync": "deno run --allow-net --allow-read --allow-write --allow-env scripts/sync-upstream.ts",
-    "package": "deno run --allow-run --allow-read --allow-write --allow-env scripts/package.ts"
+    "package": "deno run --allow-run --allow-read --allow-write --allow-env --allow-net=registry.npmjs.org scripts/package.ts"
   },
   "compilerOptions": {
     "strict": true,
