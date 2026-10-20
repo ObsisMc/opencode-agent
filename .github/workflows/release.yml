@@ -66,6 +66,10 @@ jobs:
 
       # Writes dist/packages/*.orax (one per declared target) and dist/manifest.toml, reproducing
       # exactly what upstream.lock.json records rather than resolving anything itself.
+      # With `--agent-configuration` every package carries assets/config.json, the Agent
+      # declaration, and the release binds it; the flag waits until the Ora hosts that resolve the
+      # declaration are deployed — current hosts install an `agent`-kind package carrying it but
+      # then refuse to activate the plugin, so the bytes must not ship early.
       - name: Package
         env:
           GH_TOKEN: ${{ github.token }}
@@ -78,8 +82,12 @@ jobs:
           TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
-          gh release create "$TAG" \
-            dist/packages/*.orax dist/manifest.toml \
+          ASSETS=(dist/packages/*.orax dist/manifest.toml)
+          # The static declaration copy only exists when the release bound one.
+          if [ -f dist/agent-configuration.json ]; then
+            ASSETS+=(dist/agent-configuration.json)
+          fi
+          gh release create "$TAG" "${ASSETS[@]}" \
             --title "$TAG" \
             --generate-notes
 

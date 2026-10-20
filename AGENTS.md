@@ -270,6 +270,25 @@ Bump `orax.toml` `version` before tagging: `install_local` refuses a version
 that is already installed and never retires older ones, so reusing a number
 silently leaves the old code running.
 
+### The Agent declaration, and when a release ships it
+
+`assets/config.json` is the Agent declaration of what this plugin asks the host
+to configure: one personal model connection over `openai-completions` or
+`anthropic-messages`. It only ships when packaging runs with
+`deno task package --agent-configuration`: every `.orax` then carries it, the
+script reads it back from each finished archive and refuses a release whose
+packages disagree, writes the static copy `dist/agent-configuration.json`, and
+adds `[agent_configuration]` to `dist/manifest.toml`. `release.yml` attaches the
+copy and `marketplace.yml` places it beside the registry entry. A release binds
+exactly one declaration digest, and `tests/package_test.ts` pins it, so
+reformatting the file is a conscious, release-affecting change.
+
+**The flag waits for host support.** A current Ora host installs an `agent`-kind
+package carrying a declaration it cannot compile and then refuses to activate
+it, so `release.yml` passes the flag only once hosts resolving the declaration
+are deployed — an owner decision made by editing one line. Without the flag the
+release is exactly what it was before.
+
 ## Logging
 
 Everything this plugin says goes through the SDK's `plugin.logger`, which writes
@@ -346,11 +365,12 @@ the run.
 
 - `deno task check` / `lint` / `format` / `simulate` / `build` / `sync` /
   `package`.
-- There is no unit test suite here; `tests/host-simulator.ts` drives the plugin
-  the way Ora's host does and needs a real CLI, staged or on PATH. CI runs only
-  `check` and `lint`, deliberately: type checking resolves the whole module
-  graph, so it is also what catches an SDK version that is not published yet,
-  and lint stays meaningful even while that fails.
+- `deno task test` runs `tests/package_test.ts`, the packaging checks that need
+  no CLI. `tests/host-simulator.ts` drives the plugin the way Ora's host does
+  and needs a real CLI, staged or on PATH. CI runs only `check` and `lint`,
+  deliberately: type checking resolves the whole module graph, so it is also
+  what catches an SDK version that is not published yet, and lint stays
+  meaningful even while that fails.
 - The SDK is imported from its published JSR package and pinned in `deno.json`;
   keep `deno.lock` synchronized when changing the SDK version.
 - `scripts/package.ts` and `scripts/upstream.ts` know nothing about OpenCode
