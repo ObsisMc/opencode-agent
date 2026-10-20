@@ -1,27 +1,38 @@
 {
   "repo": "anomalyco/opencode",
-  "tag": "v1.19.3",
-  "publishedAt": "2026-10-16T12:31:52Z",
+  "tag": "2.0.32",
+  "npm": {
+    "package": "@opencode/cli",
+    "version": "2.0.32"
+  },
   "assets": {
     "aarch64-apple-darwin": {
-      "name": "opencode-darwin-arm64.zip",
-      "size": 45587801,
-      "sha256": "c2d0fecd27acf6e08be02c1f5d384614d07495587766bcc4a6bff3971749bb64"
+      "name": "@opencode/cli-darwin-arm64",
+      "npm": {
+        "url": "https://registry.npmjs.org/@opencode/cli-darwin-arm64/-/cli-darwin-arm64-2.0.32.tgz",
+        "integrity": "sha512-wASwXBsWaOAYcZrh4ZLl4oaVxPCUAGVb7zZvXBBF8TjWE4uWgY0D2tj6gn80JfcO3b/s9woM6dP/gKqYKK2EdQ=="
+      }
     },
     "x86_64-unknown-linux-gnu": {
-      "name": "opencode-linux-x64.tar.gz",
-      "size": 60716380,
-      "sha256": "13a8fb2978302071b86f9d7e00da9c8895f9cd846978379c3bdc6a5333536c9b"
+      "name": "@opencode/cli-linux-x64",
+      "npm": {
+        "url": "https://registry.npmjs.org/@opencode/cli-linux-x64/-/cli-linux-x64-2.0.32.tgz",
+        "integrity": "sha512-Q50ofBQ3gdwjD6ZQhrVR8fVlm8D2xPMshy4dynY6l6b+qLdKgBSJ9WpoaDyrQX1YWmf2s7IN4RbXmoXXdJitDA=="
+      }
     },
     "aarch64-unknown-linux-gnu": {
-      "name": "opencode-linux-arm64.tar.gz",
-      "size": 60519745,
-      "sha256": "7900818a6a98881edbbadab4b7525940eff3b9750040c200481f9f56cacee405"
+      "name": "@opencode/cli-linux-arm64",
+      "npm": {
+        "url": "https://registry.npmjs.org/@opencode/cli-linux-arm64/-/cli-linux-arm64-2.0.32.tgz",
+        "integrity": "sha512-YR5O03irvmot/G0f8W49ehvhn5uqCFN3vf9JTsChvf47W6ldjKCNvsaCSXS2SP26dPOUMQBn7WqbKnyHzrNR5w=="
+      }
     },
     "x86_64-pc-windows-msvc": {
-      "name": "opencode-windows-x64.zip",
-      "size": 62204138,
-      "sha256": "e4ce9117f55fc068414513789f8c7d1049f855d7518bb4e350b9170a3a20d8c3"
+      "name": "@opencode/cli-windows-x64",
+      "npm": {
+        "url": "https://registry.npmjs.org/@opencode/cli-windows-x64/-/cli-windows-x64-2.0.32.tgz",
+        "integrity": "sha512-5VdKolj2/NkSk3BuM4qeiYpnNnGRT7szmd2RIv3+aSDPMwD9yRySYkJ2f1WIM7dTDfO5lZHAXVoipt6+i6AD4A=="
+      }
     }
   }
 }

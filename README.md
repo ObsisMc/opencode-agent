@@ -79,13 +79,23 @@ cmd /c mklink /J "<ORA_DATA_DIR>\plugins" "%USERPROFILE%\.ora\plugins\installed"
 
 ## Building from source
 
+This prerelease pins OpenCode **2.0.32** from the official `@opencode/cli` npm
+distribution. `bundle.config.ts` selects an explicit version and platform
+packages; `deno task sync` records their tarball URLs and SHA-512 integrity in
+`upstream.lock.json`. Packaging verifies integrity before extracting
+`package/bin/opencode[.exe]`; it never resolves a newer version. The GitHub
+Release source remains supported for configurations without `npm`.
+
 ```
+deno task sync --check
 deno task build
-deno task package --tag v0.2.4 --repo ora-space/opencode-agent
+deno task package --tag v0.7.0-opencode2.1 --repo ora-space/opencode-agent
 ```
 
 This produces one `.orax` package per target platform, with the matching
-OpenCode CLI bundled inside. `gh` is the only external tool required.
+OpenCode CLI bundled inside. npm packaging downloads from `registry.npmjs.org`;
+GitHub-based configurations additionally require `gh`. Generated download URLs
+describe a future release; building packages does not upload or publish them.
 
 `bundle.config.ts` decides which of the two release shapes is built, and it is
 the only file to change to switch:
@@ -124,6 +134,18 @@ for a package that bundles no CLI, and the run exercises the `PATH` fallback
 against your own OpenCode instead.
 
 `deno task check` type checks and `deno task lint` lints the sources.
+`deno test scripts/upstream.test.ts` checks archive integrity rejection.
+
+To exercise the bundled entrypoint as well as the CLI, extract a complete
+package to a separate directory and run:
+
+```
+deno task simulate --package-root /absolute/extracted-package --cwd /absolute/workspace
+```
+
+The simulator fails on ACP error responses and covers startup, model discovery,
+Effect coordination/restart/readiness and stop. It does not install the package
+into a user's Ora profile or replace the marketplace version.
 
 ### SDK
 
@@ -151,9 +173,19 @@ shows up the next time the picker is opened.
 
 ## Known limits
 
-- Each model discovery leaves one empty session behind in OpenCode's own session
-  list. OpenCode advertises `session/close`, `session/fork`, `session/list`, and
-  `session/resume`, but not `session/delete`, so the probe has nothing to clean
-  up with; the five-minute cache is what keeps the count down.
+- OpenCode v2 supports `session/delete`, which model discovery uses to remove
+  its temporary session. Older CLI overrides without that capability leave an
+  empty session behind.
+- V2 runs as `opencode acp` with the host-provided working directory; it does
+  not accept the v1 `--cwd` flag.
+- The plugin transparently forwards child-session metadata. Complete child
+  details after reload depend on the host preserving that metadata in history.
+  This prerelease does not implement host history or UI changes and does not
+  enable the separate `opencode/child-session-updates` extension.
+- Nested subagents require OpenCode's `experimental.subagent_depth` to permit
+  the requested depth. The plugin does not change the user's depth policy.
+- Interactive question forms require an ACP client supporting the corresponding
+  elicitation capability. With no such capability, OpenCode reports that the
+  question could not be shown; ordinary permission requests remain separate.
 - Killing the CLI on agent stop is best effort; Ora retains process-tree reaping
   as a backstop.
