@@ -186,6 +186,27 @@ it:
 Invocation env wins over provider env
 (`{ ...providerEnv(), ...invocation.env }`), so a caller can always override.
 
+## Platform model route
+
+On an Ora Node, `agent/start` can carry a frozen `modelContext`: one model over
+`openai-completions` or `anthropic-messages`, the platform proxy URL and a
+temporary token. `src/services/model-route.ts` turns it into the OpenCode
+provider configuration the Node used to write itself, now owned by the plugin
+that drives the CLI, and the SDK refuses the start unless `onStart` returns the
+exact `AgentModelApplied`.
+
+- The configuration travels as `OPENCODE_CONFIG_CONTENT` and names the token as
+  `{env:ORA_MODEL_ACCESS_TOKEN}`, so the text can be logged or persisted without
+  the token; only the CLI's own environment holds it.
+- `OPENCODE_CONFIG_DIR` points at the session's private `XDG_CONFIG_HOME` and
+  project configuration is disabled, so neither the repository's nor the host's
+  `opencode.json` can replace the provider. A start whose host provides no
+  private configuration root is refused rather than run on the host's own.
+- Settings must be empty — this release declares none — and the proxy must be an
+  HTTPS URL without credentials, query or fragment.
+- `OpenCodeClient.useRoute` keeps the route for every later start, so an Effect
+  `reactivate` restart runs with the same configuration.
+
 ## Process ownership
 
 Every subprocess goes through the host: `createHostProcesses(plugin)` →
@@ -365,12 +386,13 @@ the run.
 
 - `deno task check` / `lint` / `format` / `simulate` / `build` / `sync` /
   `package`.
-- `deno task test` runs `tests/package_test.ts`, the packaging checks that need
-  no CLI. `tests/host-simulator.ts` drives the plugin the way Ora's host does
-  and needs a real CLI, staged or on PATH. CI runs only `check` and `lint`,
-  deliberately: type checking resolves the whole module graph, so it is also
-  what catches an SDK version that is not published yet, and lint stays
-  meaningful even while that fails.
+- `deno task test` runs the tests that need no CLI: `tests/package_test.ts`
+  covers packaging and `tests/model_route_test.ts` drives the platform model
+  route against a scripted spawn. `tests/host-simulator.ts` drives the plugin
+  the way Ora's host does and needs a real CLI, staged or on PATH. CI runs only
+  `check` and `lint`, deliberately: type checking resolves the whole module
+  graph, so it is also what catches an SDK version that is not published yet,
+  and lint stays meaningful even while that fails.
 - The SDK is imported from its published JSR package and pinned in `deno.json`;
   keep `deno.lock` synchronized when changing the SDK version.
 - `scripts/package.ts` and `scripts/upstream.ts` know nothing about OpenCode

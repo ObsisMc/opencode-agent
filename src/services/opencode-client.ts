@@ -1,6 +1,7 @@
 import type { HostProcesses, JsonValue } from "@ora-space/plugin-sdk";
 import { spawnOpenCode } from "./command.ts";
 import { logger } from "./log.ts";
+import type { ModelRoute } from "./model-route.ts";
 import { decodeLines, encodeLine } from "./ndjson.ts";
 
 const log = logger("opencode-client");
@@ -24,7 +25,11 @@ export interface OpenCodeClientOptions {
    * Which program a spawn resolves to is `command.ts`'s decision and is deliberately not a
    * parameter here: this class owns the CLI's lifetime, not the question of where it lives.
    */
-  spawn?: (args: string[], cwd: string) => SpawnedProcess;
+  spawn?: (
+    args: string[],
+    cwd: string,
+    env: Record<string, string>,
+  ) => SpawnedProcess;
   /** Receives every ACP frame emitted by the CLI, in output order. */
   onAcpFrame?: (frame: JsonValue) => void;
   /** Invoked after the CLI exits on its own, never after an explicit stop. */
@@ -48,6 +53,7 @@ export class OpenCodeClient {
   readonly #spawn: (
     args: string[],
     cwd: string,
+    env: Record<string, string>,
   ) => SpawnedProcess | Promise<SpawnedProcess>;
   readonly #onAcpFrame: (frame: JsonValue) => void;
   readonly #onExited: () => void;
@@ -55,10 +61,12 @@ export class OpenCodeClient {
   #processes: HostProcesses | undefined;
   #running: RunningProcess | undefined;
   #expectedExit = false;
+  /** The platform route every generation of the CLI starts with; absent on a local host. */
+  #route: ModelRoute | undefined;
 
   constructor(options: OpenCodeClientOptions = {}) {
     this.#spawn = options.spawn ??
-      ((args, cwd) => this.#spawnViaHost(args, cwd));
+      ((args, cwd, env) => this.#spawnViaHost(args, cwd, env));
     this.#onAcpFrame = options.onAcpFrame ?? (() => {});
     this.#onExited = options.onExited ?? (() => {});
   }
@@ -76,6 +84,16 @@ export class OpenCodeClient {
    */
   attachProcesses(processes: HostProcesses): void {
     this.#processes = processes;
+  }
+
+  /**
+   * Fixes the platform route for every later start, including an Effect restart.
+   *
+   * One plugin process serves one execution, so the route is set once per `agent/start`;
+   * `undefined` returns to the CLI's own configuration.
+   */
+  useRoute(route: ModelRoute | undefined): void {
+    this.#route = route;
   }
 
   /**
@@ -97,14 +115,22 @@ export class OpenCodeClient {
     let process: SpawnedProcess;
     try {
       // V2 removed --cwd; the host-owned process cwd supplies the same directory.
-      process = await this.#spawn(["acp"], cwd);
+      process = await this.#spawn(["acp"], cwd, {
+        ...this.#route?.environment,
+      });
     } catch (error) {
       log.warn("the CLI could not be spawned", { context: { cwd }, error });
       throw error;
     }
     this.#running = { process, stdinWriter: process.stdin.getWriter() };
     this.#attach(process);
-    log.info("CLI running", { context: { cwd, pid: process.pid } });
+    log.info("CLI running", {
+      context: {
+        cwd,
+        pid: process.pid,
+        platformRoute: this.#route !== undefined,
+      },
+    });
   }
 
   /**
@@ -254,13 +280,14 @@ export class OpenCodeClient {
   async #spawnViaHost(
     args: string[],
     cwd: string,
+    env: Record<string, string>,
   ): Promise<SpawnedProcess> {
     if (this.#processes === undefined) {
       throw new Error(
         "OpenCodeClient cannot spawn before attachProcesses() runs",
       );
     }
-    const child = await spawnOpenCode(this.#processes, { args, cwd });
+    const child = await spawnOpenCode(this.#processes, { args, cwd, env });
     return {
       stdin: new WritableStream<Uint8Array>({
         write: (chunk) => child.write(chunk),
