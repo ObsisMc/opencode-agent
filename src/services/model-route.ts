@@ -23,6 +23,11 @@ export interface ModelRoute {
   readonly applied: AgentModelApplied;
   /** The one model this execution may use; every selector and switch is held to it. */
   readonly model: FrozenModel;
+  /**
+   * What must never leave the CLI: the token, and the gateway address in every spelling a
+   * message is likely to use (full URL, host with port, bare hostname).
+   */
+  readonly secrets: readonly string[];
   readonly environment: Readonly<Record<string, string>>;
 }
 
@@ -88,6 +93,7 @@ export function modelRoute(
       configurationRevision: configuration.configurationRevision,
     },
     model: { id: `${PROVIDER}/${model.id}`, name: model.name },
+    secrets: gatewaySecrets(context),
     environment: {
       OPENCODE_CONFIG_CONTENT: JSON.stringify(config),
       [TOKEN_VARIABLE]: context.token,
@@ -120,6 +126,17 @@ function platformProxy(value: string): boolean {
   }
   return url.protocol === "https:" && url.username === "" &&
     url.password === "" && url.search === "" && url.hash === "";
+}
+
+function gatewaySecrets(context: AgentModelContext): string[] {
+  const gateway = new URL(context.proxyBaseUrl);
+  return [
+    context.token,
+    context.proxyBaseUrl,
+    gateway.origin,
+    gateway.host,
+    gateway.hostname,
+  ];
 }
 
 /** Fails `agent/start` without describing the sensitive input. */

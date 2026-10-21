@@ -2,6 +2,8 @@ import { assertEquals, assertRejects } from "@std/assert";
 import {
   AGENT_UNUSABLE,
   type AgentModelContext,
+  createLogger,
+  createStderrLogSink,
   type HostChildProcessOptions,
   HostRequestError,
   INVALID_PARAMS,
@@ -9,6 +11,7 @@ import {
 } from "@ora-space/plugin-sdk";
 import { bundledBinaryPath } from "../src/services/bundled-binary.ts";
 import { BIN_OVERRIDE_ENV } from "../src/services/command.ts";
+import { installLogger } from "../src/services/log.ts";
 import { startOpenCode } from "../src/handlers/lifecycle.ts";
 import { modelRoute } from "../src/services/model-route.ts";
 import {
@@ -404,6 +407,84 @@ Deno.test("model discovery on a platform route answers the frozen model without 
     true,
   );
   assertEquals(new OpenCodeClient().frozenModel, undefined);
+});
+
+Deno.test("CLI errors reach Ora with their code but without their text", async () => {
+  const { cli, client, forwarded } = await platformClient();
+  cli.emit({
+    jsonrpc: "2.0",
+    id: 7,
+    error: {
+      code: -32000,
+      message: "401 from https://other.invalid: bad key",
+      data: { body: "leaked" },
+    },
+  });
+  cli.emit({ jsonrpc: "2.0", id: 8, error: "not an object" });
+  await waitFor(() => forwarded.length === 2);
+  assertEquals(forwarded, [
+    {
+      jsonrpc: "2.0",
+      id: 7,
+      error: {
+        code: -32000,
+        message: "The OpenCode agent could not complete the request",
+      },
+    },
+    {
+      jsonrpc: "2.0",
+      id: 8,
+      error: {
+        code: -32603,
+        message: "The OpenCode agent could not complete the request",
+      },
+    },
+  ]);
+  await client.stop();
+});
+
+Deno.test("the token and gateway address never leave the CLI's output", async () => {
+  const records: string[] = [];
+  installLogger(createLogger({ write: (line) => records.push(line) }));
+  try {
+    const { cli, client, forwarded } = await platformClient();
+    cli.emit({
+      jsonrpc: "2.0",
+      method: "session/update",
+      params: {
+        sessionId: "s1",
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: {
+            type: "text",
+            text:
+              `Error calling https://gateway.internal/runtime/openai/v1/chat/completions with ${TOKEN}; gateway.internal unreachable`,
+          },
+        },
+      },
+    });
+    cli.emitLine(`not json ${TOKEN} https://gateway.internal`);
+    cli.emitStderr(
+      `ERROR service=llm url=https://gateway.internal/runtime/openai/v1 key=${TOKEN}`,
+    );
+    await waitFor(() =>
+      forwarded.length === 1 &&
+      records.some((record) => record.includes("service=llm")) &&
+      records.some((record) => record.includes("non-JSON"))
+    );
+    const text = JSON.stringify(forwarded) + records.join("\n");
+    assertEquals(text.includes(TOKEN), false);
+    assertEquals(text.includes("gateway.internal"), false);
+    assertEquals(
+      (forwarded[0] as {
+        params: { update: { content: { text: string } } };
+      }).params.update.content.text,
+      "Error calling [redacted]/chat/completions with [redacted]; [redacted] unreachable",
+    );
+    await client.stop();
+  } finally {
+    installLogger(createLogger(createStderrLogSink()));
+  }
 });
 
 /** A client started on the platform route over a scripted CLI. */

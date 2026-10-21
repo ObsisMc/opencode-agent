@@ -230,6 +230,12 @@ exact `AgentModelApplied`.
   `configOptions` model entry in a result or `config_option_update` is narrowed
   to it — `enabled_providers` already limits the catalog, but managed settings
   outrank this plugin's configuration.
+- Nothing the CLI prints is trusted to keep the route's secrets. Every stdout
+  and stderr line has the token and the gateway URL, origin, host and hostname
+  replaced with `[redacted]` before it is parsed, forwarded or logged, and every
+  CLI error response keeps its `code` but loses its `message` and `data`, which
+  can carry a provider response. Diagnostics stay in the log rather than being
+  dropped.
 
 ## Process ownership
 

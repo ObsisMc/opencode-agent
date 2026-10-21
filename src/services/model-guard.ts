@@ -20,6 +20,11 @@ export type InboundDecision =
 const METHOD_NOT_AVAILABLE = -32601;
 /** JSON-RPC "invalid params": a model other than the frozen one was asked for. */
 const MODEL_FROZEN = -32602;
+/** What every CLI error says instead; its own text can quote the gateway or a provider response. */
+const REDACTED_ERROR_MESSAGE =
+  "The OpenCode agent could not complete the request";
+/** What a secret is replaced with wherever it would otherwise reach Ora or a log. */
+const REDACTED = "[redacted]";
 
 /**
  * Methods that could hand the CLI another upstream, another credential, or none at all.
@@ -39,13 +44,30 @@ function isRouteMutation(method: string): boolean {
  *
  * The provider itself is fixed by the configuration `model-route.ts` hands the CLI; this class
  * keeps a client from asking the CLI to leave it over ACP, and narrows every model selector the
- * CLI reports to the frozen model.
+ * CLI reports to the frozen model. It also keeps the route's secrets in the CLI: error text is
+ * replaced, and the token and gateway address are scrubbed from every line the CLI prints before
+ * it is forwarded or logged.
  */
 export class ModelGuard {
   readonly #model: FrozenModel;
+  /** Longest first, so a URL is replaced whole before the host inside it is. */
+  readonly #secrets: readonly string[];
 
-  constructor(model: FrozenModel) {
+  constructor(model: FrozenModel, secrets: readonly string[] = []) {
     this.#model = model;
+    this.#secrets = [...new Set(secrets.filter((secret) => secret !== ""))]
+      .sort((a, b) => b.length - a.length);
+  }
+
+  /** Replaces every secret in one line of CLI output before it is parsed, sent or logged. */
+  scrub(text: string): string {
+    let scrubbed = text;
+    for (const secret of this.#secrets) {
+      if (scrubbed.includes(secret)) {
+        scrubbed = scrubbed.split(secret).join(REDACTED);
+      }
+    }
+    return scrubbed;
   }
 
   /** The model `agent/list_models` reports: the frozen one, never anything discovered. */
@@ -83,7 +105,7 @@ export class ModelGuard {
   }
 
   /**
-   * Narrows every model selector in one frame the CLI sent before Ora sees it.
+   * Narrows every model selector in, and redacts any error of, one frame the CLI sent.
    *
    * `enabled_providers` already limits OpenCode's catalog to the one provider this plugin writes,
    * but configuration that outranks it (managed settings) is outside this plugin's control, so
@@ -92,6 +114,20 @@ export class ModelGuard {
    */
   outbound(frame: JsonValue): JsonValue {
     if (!isObject(frame)) return frame;
+    if (typeof frame.method !== "string" && "error" in frame) {
+      // The code still tells Ora what kind of failure this was; the text and data are the CLI's,
+      // and may carry a provider response or the gateway's address (ADR D2).
+      const code = isObject(frame.error) ? frame.error.code : undefined;
+      return {
+        ...frame,
+        error: {
+          code: typeof code === "number" && Number.isInteger(code)
+            ? code
+            : -32603,
+          message: REDACTED_ERROR_MESSAGE,
+        },
+      };
+    }
     if (isObject(frame.result)) {
       return { ...frame, result: this.#narrowModels(frame.result) };
     }

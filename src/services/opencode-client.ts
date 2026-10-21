@@ -103,7 +103,9 @@ export class OpenCodeClient {
    */
   useRoute(route: ModelRoute | undefined): void {
     this.#route = route;
-    this.#guard = route === undefined ? undefined : new ModelGuard(route.model);
+    this.#guard = route === undefined
+      ? undefined
+      : new ModelGuard(route.model, route.secrets);
   }
 
   /**
@@ -250,7 +252,9 @@ export class OpenCodeClient {
    */
   async #pumpStdout(process: SpawnedProcess): Promise<void> {
     try {
-      for await (const line of decodeLines(process.stdout)) {
+      for await (const raw of decodeLines(process.stdout)) {
+        // Scrubbed before anything reads it, so neither Ora nor the log below sees a secret.
+        const line = this.#guard?.scrub(raw) ?? raw;
         let frame: JsonValue;
         try {
           frame = JSON.parse(line) as JsonValue;
@@ -297,7 +301,10 @@ export class OpenCodeClient {
     try {
       for await (const line of decodeLines(process.stderr)) {
         if (line.length > 0) {
-          cliLog.info(line, { context: { pid: process.pid } });
+          // A failed provider request can be echoed with its URL or headers.
+          cliLog.info(this.#guard?.scrub(line) ?? line, {
+            context: { pid: process.pid },
+          });
         }
       }
     } catch (error) {
