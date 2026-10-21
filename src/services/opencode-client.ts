@@ -1,7 +1,7 @@
 import type { HostProcesses, JsonValue } from "@ora-space/plugin-sdk";
 import { spawnBundledOpenCode, spawnOpenCode } from "./command.ts";
 import { logger } from "./log.ts";
-import { ModelGuard } from "./model-guard.ts";
+import { type FrozenModel, ModelGuard } from "./model-guard.ts";
 import type { ModelRoute } from "./model-route.ts";
 import { decodeLines, encodeLine } from "./ndjson.ts";
 
@@ -73,6 +73,11 @@ export class OpenCodeClient {
       ((args, cwd, env) => this.#spawnViaHost(args, cwd, env));
     this.#onAcpFrame = options.onAcpFrame ?? (() => {});
     this.#onExited = options.onExited ?? (() => {});
+  }
+
+  /** The only model a platform route may use; `undefined` keeps the CLI's own discovery. */
+  get frozenModel(): FrozenModel | undefined {
+    return this.#guard?.model;
   }
 
   get running(): boolean {
@@ -268,7 +273,7 @@ export class OpenCodeClient {
         log.debug("CLI ACP frame received", {
           context: { pid: process.pid, ...summarize(frame) },
         });
-        this.#onAcpFrame(frame);
+        this.#onAcpFrame(this.#guard?.outbound(frame) ?? frame);
       }
       log.debug("CLI stdout reached EOF", {
         context: { pid: process.pid },

@@ -225,6 +225,11 @@ exact `AgentModelApplied`.
   frozen `ora-model/<id>` (an effort variant of it is allowed). OpenCode 2.0.32
   serves only `authenticate`, as a no-op; the guard is what keeps a later pin
   that serves the rest from becoming a way around the route.
+- Only the frozen model is ever offered. `agent/list_models` answers it without
+  a discovery probe, which would run on the host's own configuration, and every
+  `configOptions` model entry in a result or `config_option_update` is narrowed
+  to it — `enabled_providers` already limits the catalog, but managed settings
+  outrank this plugin's configuration.
 
 ## Process ownership
 

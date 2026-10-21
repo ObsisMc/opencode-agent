@@ -38,13 +38,19 @@ function isRouteMutation(method: string): boolean {
  * Keeps one platform-model execution on its frozen provider and model.
  *
  * The provider itself is fixed by the configuration `model-route.ts` hands the CLI; this class
- * only keeps a client from asking the CLI to leave it over ACP.
+ * keeps a client from asking the CLI to leave it over ACP, and narrows every model selector the
+ * CLI reports to the frozen model.
  */
 export class ModelGuard {
   readonly #model: FrozenModel;
 
   constructor(model: FrozenModel) {
     this.#model = model;
+  }
+
+  /** The model `agent/list_models` reports: the frozen one, never anything discovered. */
+  get model(): FrozenModel {
+    return this.#model;
   }
 
   /** Decides what happens to one frame Ora sent towards the CLI. */
@@ -74,6 +80,57 @@ export class ModelGuard {
       );
     }
     return { forward: frame };
+  }
+
+  /**
+   * Narrows every model selector in one frame the CLI sent before Ora sees it.
+   *
+   * `enabled_providers` already limits OpenCode's catalog to the one provider this plugin writes,
+   * but configuration that outranks it (managed settings) is outside this plugin's control, so
+   * the selector Ora shows is narrowed here as well (ADR D5: visible session options never widen
+   * the set). Results and `config_option_update` notifications both carry one.
+   */
+  outbound(frame: JsonValue): JsonValue {
+    if (!isObject(frame)) return frame;
+    if (isObject(frame.result)) {
+      return { ...frame, result: this.#narrowModels(frame.result) };
+    }
+    if (
+      frame.method === "session/update" && isObject(frame.params) &&
+      isObject(frame.params.update)
+    ) {
+      return {
+        ...frame,
+        params: {
+          ...frame.params,
+          update: this.#narrowModels(frame.params.update),
+        },
+      };
+    }
+    return frame;
+  }
+
+  #narrowModels(
+    payload: { [key: string]: JsonValue },
+  ): { [key: string]: JsonValue } {
+    const narrowed = { ...payload };
+    const only = { value: this.#model.id, name: this.#model.name };
+    if (Array.isArray(payload.configOptions)) {
+      narrowed.configOptions = payload.configOptions.map((option) =>
+        isObject(option) &&
+          (option.id === "model" || option.category === "model")
+          ? { ...option, currentValue: only.value, options: [only] }
+          : option
+      );
+    }
+    if (isObject(payload.models)) {
+      narrowed.models = {
+        ...payload.models,
+        currentModelId: this.#model.id,
+        availableModels: [{ modelId: this.#model.id, name: this.#model.name }],
+      };
+    }
+    return narrowed;
   }
 
   /**

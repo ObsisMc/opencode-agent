@@ -331,6 +331,81 @@ Deno.test("a platform route spawns only the bundled CLI, ignoring an override an
   assertEquals(spawns[0].args, ["acp"]);
 });
 
+Deno.test("every model selector the CLI reports offers only the frozen model", async () => {
+  const { cli, client, forwarded } = await platformClient();
+  assertEquals(client.frozenModel, {
+    id: "ora-model/team/model",
+    name: "Team model",
+  });
+  const mode = { id: "mode", category: "mode", currentValue: "build" };
+  const picker = {
+    id: "model",
+    name: "Model",
+    category: "model",
+    type: "select",
+    currentValue: "openai/gpt-5",
+    options: [
+      { value: "openai/gpt-5", name: "openai/GPT-5" },
+      { value: "ora-model/team/model", name: "ora-model/Team model" },
+    ],
+  };
+  const frozen = {
+    ...picker,
+    currentValue: "ora-model/team/model",
+    options: [{ value: "ora-model/team/model", name: "Team model" }],
+  };
+  cli.emit({
+    jsonrpc: "2.0",
+    id: 1,
+    result: { sessionId: "s1", configOptions: [picker, mode] },
+  });
+  cli.emit({
+    jsonrpc: "2.0",
+    method: "session/update",
+    params: {
+      sessionId: "s1",
+      update: {
+        sessionUpdate: "config_option_update",
+        configOptions: [picker],
+      },
+    },
+  });
+  await waitFor(() => forwarded.length === 2);
+  assertEquals(forwarded, [
+    {
+      jsonrpc: "2.0",
+      id: 1,
+      result: { sessionId: "s1", configOptions: [frozen, mode] },
+    },
+    {
+      jsonrpc: "2.0",
+      method: "session/update",
+      params: {
+        sessionId: "s1",
+        update: {
+          sessionUpdate: "config_option_update",
+          configOptions: [frozen],
+        },
+      },
+    },
+  ]);
+  await client.stop();
+});
+
+Deno.test("model discovery on a platform route answers the frozen model without a probe", async () => {
+  // Read as text: importing the entrypoint would start serving the host.
+  const main = await Deno.readTextFile(
+    new URL("../src/main.ts", import.meta.url),
+  );
+  const handler = main.slice(main.indexOf("override onListModels"));
+  assertEquals(
+    handler.indexOf("this.#client.frozenModel") <
+      handler.indexOf("listOpenCodeModels("),
+    true,
+  );
+  assertEquals(new OpenCodeClient().frozenModel, undefined);
+});
+
 /** A client started on the platform route over a scripted CLI. */
 async function platformClient() {
   const cli = new ScriptedCli();
@@ -422,4 +497,13 @@ function silentProcess(): SpawnedProcess {
       ended?.();
     },
   };
+}
+
+/** Polls a condition the bridge settles asynchronously, failing after a bounded wait. */
+async function waitFor(condition: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 200; attempt++) {
+    if (condition()) return;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error("condition was never met");
 }
