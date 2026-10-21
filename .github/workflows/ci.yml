@@ -31,3 +31,6 @@ jobs:
       # step above cannot run.
       - name: Lint
         run: deno task lint
+
+      - name: Archive integrity tests
+        run: deno test scripts/upstream.test.ts

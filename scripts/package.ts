@@ -31,7 +31,7 @@ import { basename, dirname, join, relative } from "@std/path";
 import { UntarStream } from "@std/tar";
 import { BlobReader, ZipReader, ZipWriter } from "@zip-js/zip-js";
 import bundle from "../bundle.config.ts";
-import { LOCK_PATH, readLock } from "./upstream.ts";
+import { LOCK_PATH, readLock, verifyIntegrity } from "./upstream.ts";
 
 /** Operating systems a package can be built for, as `Deno.build.os` spells them. */
 export type TargetOs = typeof Deno.build.os;
@@ -51,6 +51,8 @@ export type BundleConfig =
     cli: "bundled";
     /** GitHub `owner/name` the CLI is released from. */
     upstream: string;
+    /** An explicitly selected npm distribution; never resolves latest at package time. */
+    npm?: { package: string; version: string };
     /** Release asset serving each canonical Rust target triple. */
     assets: Record<string, string>;
     /**
@@ -299,40 +301,60 @@ async function buildBundledPackage(
   plan: TargetPlan,
   upstream: string,
   upstreamTag: string,
-  expectedSha256: string,
+  expectedSha256: string | undefined,
   fileName: string,
   includeDeclaration: boolean,
+  npmAsset?: { url: string; integrity: string },
 ): Promise<void> {
   await Deno.remove(STAGE_DIR, { recursive: true }).catch(() => {});
   const staged = join(STAGE_DIR, plan.binaryPath);
   await Deno.mkdir(dirname(staged), { recursive: true });
 
-  const archive = join(DOWNLOAD_DIR, plan.asset);
-  await run(
-    "gh",
-    "release",
-    "download",
-    upstreamTag,
-    "--repo",
-    upstream,
-    "--pattern",
-    plan.asset,
-    "--dir",
+  const archive = join(
     DOWNLOAD_DIR,
-    "--clobber",
+    npmAsset ? `${plan.triple}.tgz` : plan.asset,
   );
+  if (npmAsset) {
+    const response = await fetch(npmAsset.url, {
+      signal: AbortSignal.timeout(180_000),
+    });
+    if (!response.ok) throw new Error(`download failed: ${response.status}`);
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    await verifyIntegrity(bytes, npmAsset.integrity);
+    await Deno.writeFile(archive, bytes);
+  } else {
+    await run(
+      "gh",
+      "release",
+      "download",
+      upstreamTag,
+      "--repo",
+      upstream,
+      "--pattern",
+      plan.asset,
+      "--dir",
+      DOWNLOAD_DIR,
+      "--clobber",
+    );
+  }
   // Verified against the digest `deno task sync` recorded from GitHub's own Releases API, the
   // same role npm's `dist.integrity` plays for the sibling `claude-code-agent` and `codex-agent`
   // — this catches upstream replacing an asset under a tag this plugin already pinned.
-  const actualSha256 = await sha256Hex(archive);
-  if (actualSha256 !== expectedSha256) {
+  const actualSha256 = npmAsset ? undefined : await sha256Hex(archive);
+  if (!npmAsset && actualSha256 !== expectedSha256) {
     throw new Error(
       `${plan.asset} sha256 ${actualSha256} does not match ${LOCK_PATH}'s pinned ${expectedSha256}; run 'deno task sync'`,
     );
   }
   // Upstream ships the CLI as the sole entry at the archive root, under the same name this
   // package uses for it.
-  await extractEntry(archive, basename(plan.binaryPath), staged);
+  await extractEntry(
+    archive,
+    npmAsset
+      ? `package/bin/${basename(plan.binaryPath)}`
+      : basename(plan.binaryPath),
+    staged,
+  );
 
   await stagePluginFiles(plan.triple, includeDeclaration);
   await writeOrax(STAGE_DIR, join(PACKAGES_DIR, fileName), plan.binaryPath);
@@ -393,6 +415,18 @@ async function buildRelease(
   // shipped, and a "latest" lookup at package time could straddle an upstream release and ship a
   // version skew a rebuild would not repeat.
   const lock = await readLock();
+  if (
+    config.npm &&
+    (lock.npm?.package !== config.npm.package ||
+      lock.npm.version !== config.npm.version)
+  ) {
+    throw new Error(
+      "npm configuration differs from upstream.lock.json; run 'deno task sync'",
+    );
+  }
+  if (!config.npm && lock.npm) {
+    throw new Error("unexpected npm lock for GitHub configuration");
+  }
   console.log(`Bundling ${lock.repo} ${lock.tag}`);
 
   for (const [triple, asset] of Object.entries(config.assets)) {
@@ -407,6 +441,15 @@ async function buildRelease(
         `${LOCK_PATH} pins ${pinned.name} for ${triple}, but bundle.config.ts now names ${asset}; run 'deno task sync'`,
       );
     }
+    if (config.npm ? !pinned.npm : !pinned.sha256 || pinned.npm) {
+      throw new Error(`missing or mismatched integrity source for ${triple}`);
+    }
+    if (
+      pinned.npm &&
+      new URL(pinned.npm.url).origin !== "https://registry.npmjs.org"
+    ) {
+      throw new Error(`unexpected npm download origin for ${triple}`);
+    }
     const plan: TargetPlan = {
       triple,
       asset,
@@ -420,6 +463,7 @@ async function buildRelease(
       pinned.sha256,
       fileName,
       includeDeclaration,
+      pinned.npm,
     );
 
     const path = join(PACKAGES_DIR, fileName);

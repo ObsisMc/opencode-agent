@@ -96,7 +96,8 @@ export class OpenCodeClient {
     // stays retryable, while a package that cannot run the one it ships does not.
     let process: SpawnedProcess;
     try {
-      process = await this.#spawn(["acp", "--cwd", cwd], cwd);
+      // V2 removed --cwd; the host-owned process cwd supplies the same directory.
+      process = await this.#spawn(["acp"], cwd);
     } catch (error) {
       log.warn("the CLI could not be spawned", { context: { cwd }, error });
       throw error;

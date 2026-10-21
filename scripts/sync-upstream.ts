@@ -4,6 +4,7 @@ import bundle from "../bundle.config.ts";
 import {
   LOCK_PATH,
   readLock,
+  resolveNpmUpstream,
   resolveUpstream,
   type UpstreamLock,
   writeLock,
@@ -27,7 +28,9 @@ async function main(): Promise<void> {
   }
 
   const before = await currentLock();
-  const resolved = await resolveUpstream(bundle.upstream, bundle.assets);
+  const resolved = bundle.npm
+    ? await resolveNpmUpstream(bundle.upstream, bundle.npm, bundle.assets)
+    : await resolveUpstream(bundle.upstream, bundle.assets);
   const unchanged = before !== undefined &&
     JSON.stringify(before) === JSON.stringify(resolved);
   const summary = `${resolved.repo}@${resolved.tag}`;
@@ -46,7 +49,11 @@ async function main(): Promise<void> {
   await writeLock(resolved);
   console.log(`${LOCK_PATH} now pins ${summary}`);
   for (const [triple, asset] of Object.entries(resolved.assets)) {
-    console.log(`  ${triple}: ${asset.name} sha256:${asset.sha256}`);
+    console.log(
+      `  ${triple}: ${asset.name} ${
+        asset.npm?.integrity ?? `sha256:${asset.sha256}`
+      }`,
+    );
   }
 }
 

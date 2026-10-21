@@ -14,15 +14,17 @@ export const LOCK_PATH = "upstream.lock.json";
 export interface PinnedAsset {
   /** The release asset's file name, matching `bundle.config.ts`'s `assets` entry for this target. */
   name: string;
-  size: number;
-  sha256: string;
+  size?: number;
+  sha256?: string;
+  npm?: { url: string; integrity: string };
 }
 
 export interface UpstreamLock {
   /** GitHub `owner/name` the CLI is released from. */
   repo: string;
   tag: string;
-  publishedAt: string;
+  publishedAt?: string;
+  npm?: { package: string; version: string };
   /** Keyed by target triple, matching `bundle.config.ts`'s `assets`. */
   assets: Record<string, PinnedAsset>;
 }
@@ -104,4 +106,59 @@ export async function resolveUpstream(
     publishedAt: release.published_at,
     assets,
   };
+}
+
+/** Verifies the registry's SHA-512 SRI before any archive is extracted. */
+export async function verifyIntegrity(
+  bytes: Uint8Array<ArrayBuffer>,
+  integrity: string,
+): Promise<void> {
+  if (!/^sha512-[A-Za-z0-9+/]{86}==$/.test(integrity)) {
+    throw new Error("invalid npm SHA-512 integrity");
+  }
+  const hash = new Uint8Array(await crypto.subtle.digest("SHA-512", bytes));
+  const actual = `sha512-${btoa(String.fromCharCode(...hash))}`;
+  if (actual !== integrity) throw new Error("npm archive integrity mismatch");
+}
+
+/** Pins one explicit npm version and its per-platform archives, without following latest. */
+export async function resolveNpmUpstream(
+  repo: string,
+  npm: { package: string; version: string },
+  assetsByTriple: Record<string, string>,
+): Promise<UpstreamLock> {
+  const read = async (name: string): Promise<{
+    name: string;
+    version: string;
+    optionalDependencies?: Record<string, string>;
+    dist: { tarball: string; integrity: string };
+  }> => {
+    const response = await fetch(
+      `https://registry.npmjs.org/${encodeURIComponent(name)}/${
+        encodeURIComponent(npm.version)
+      }`,
+    );
+    if (!response.ok) {
+      throw new Error(`npm ${name}@${npm.version}: ${response.status}`);
+    }
+    return await response.json();
+  };
+  const parent = await read(npm.package);
+  const assets: Record<string, PinnedAsset> = {};
+  for (const [triple, name] of Object.entries(assetsByTriple)) {
+    if (parent.optionalDependencies?.[name] !== npm.version) {
+      throw new Error(`unlisted platform ${name}`);
+    }
+    const metadata = await read(name);
+    const { tarball: url, integrity } = metadata.dist;
+    if (
+      metadata.name !== name || metadata.version !== npm.version ||
+      new URL(url).origin !== "https://registry.npmjs.org" ||
+      !/^sha512-[A-Za-z0-9+/]{86}==$/.test(integrity)
+    ) {
+      throw new Error(`invalid npm metadata for ${name}`);
+    }
+    assets[triple] = { name, npm: { url, integrity } };
+  }
+  return { repo, tag: npm.version, npm, assets };
 }

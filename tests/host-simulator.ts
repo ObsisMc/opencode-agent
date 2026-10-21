@@ -5,7 +5,8 @@
  *   deno run --allow-run --allow-read --allow-env --allow-net tests/host-simulator.ts
  */
 import type { JsonValue } from "@ora-space/plugin-sdk";
-import { fromFileUrl } from "@std/path";
+import { join } from "@std/path";
+import { parseArgs } from "@std/cli/parse-args";
 
 const JSON_RPC_FRAME_TYPE = 0x01;
 const MAX_FRAME_LENGTH = 16 * 1024 * 1024;
@@ -90,7 +91,12 @@ function modulePath(relative: string): string {
     .replace(/^\/([A-Za-z]:)/, "$1");
 }
 
-const entrypoint = modulePath("../src/main.ts");
+const flags = parseArgs(Deno.args, { string: ["package-root", "cwd"] });
+const packageRoot = flags["package-root"] ?? modulePath("../");
+const workspace = flags.cwd ?? Deno.cwd();
+const entrypoint = flags["package-root"]
+  ? join(packageRoot, "main.js")
+  : modulePath("../src/main.ts");
 const child = new Deno.Command(Deno.execPath(), {
   args: ["run", ...HOST_PERMISSIONS, entrypoint],
   stdin: "piped",
@@ -248,8 +254,7 @@ function resolveSimulatedProgram(params: Record<string, unknown>): string {
   if (packageCommand === undefined) {
     return params.command as string;
   }
-  const packageRoot = new URL("../", import.meta.url);
-  const resolved = fromFileUrl(new URL(packageCommand, packageRoot));
+  const resolved = join(packageRoot, packageCommand);
   const stat = statOrUndefined(resolved);
   if (stat === undefined) {
     throw new SimulatedSpawnError(
@@ -289,6 +294,7 @@ async function dispatchChildProcessMethod(
         child = new Deno.Command(command, {
           args,
           cwd,
+          env: params.env as Record<string, string> | undefined,
           stdin: "piped",
           stdout: "piped",
           stderr: "piped",
@@ -416,9 +422,12 @@ await send({
   jsonrpc: "2.0",
   id: 1,
   method: "agent/start",
-  params: { cwd: Deno.cwd(), hostVersion: "0.8.0" },
+  params: { cwd: workspace, hostVersion: "0.8.0" },
 });
 const started = await waitFor((message) => message.id === 1, "agent/start");
+if (started.error) {
+  throw new Error(`agent/start: ${JSON.stringify(started.error)}`);
+}
 console.log(
   `ok: agent/start ${JSON.stringify(started.result ?? started.error)}`,
 );
@@ -440,6 +449,9 @@ const initialized = await waitFor(
   (message) => message.method === "agent/acp" && acpFrame(message).id === 1,
   "ACP initialize",
 );
+if (acpFrame(initialized).error) {
+  throw new Error(`initialize: ${JSON.stringify(acpFrame(initialized).error)}`);
+}
 console.log(
   `ok: initialize ${
     JSON.stringify(acpFrame(initialized).result).slice(0, 200)
@@ -453,13 +465,16 @@ await send({
     jsonrpc: "2.0",
     id: 2,
     method: "session/new",
-    params: { cwd: Deno.cwd(), mcpServers: [] },
+    params: { cwd: workspace, mcpServers: [] },
   },
 });
 const session = await waitFor(
   (message) => message.method === "agent/acp" && acpFrame(message).id === 2,
   "ACP session/new",
 );
+if (acpFrame(session).error) {
+  throw new Error(`session/new: ${JSON.stringify(acpFrame(session).error)}`);
+}
 console.log(
   `ok: session/new ${
     JSON.stringify(acpFrame(session).result ?? acpFrame(session).error).slice(
@@ -476,7 +491,7 @@ await send({
   jsonrpc: "2.0",
   id: 2,
   method: "agent/list_models",
-  params: { cwd: Deno.cwd() },
+  params: { cwd: workspace },
 });
 const models = await waitFor(
   (message) => message.id === 2,
@@ -584,13 +599,20 @@ await send({
     jsonrpc: "2.0",
     id: 3,
     method: "session/new",
-    params: { cwd: Deno.cwd(), mcpServers: [] },
+    params: { cwd: workspace, mcpServers: [] },
   },
 });
 const sessionAfterRestart = await waitFor(
   (message) => message.method === "agent/acp" && acpFrame(message).id === 3,
   "ACP session/new after restart",
 );
+if (acpFrame(sessionAfterRestart).error) {
+  throw new Error(
+    `session/new after restart: ${
+      JSON.stringify(acpFrame(sessionAfterRestart).error)
+    }`,
+  );
+}
 console.log(
   `ok: session/new after restart ${
     JSON.stringify(
