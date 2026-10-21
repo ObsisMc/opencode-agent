@@ -1,6 +1,7 @@
 import type { HostProcesses, JsonValue } from "@ora-space/plugin-sdk";
 import { spawnOpenCode } from "./command.ts";
 import { logger } from "./log.ts";
+import { ModelGuard } from "./model-guard.ts";
 import type { ModelRoute } from "./model-route.ts";
 import { decodeLines, encodeLine } from "./ndjson.ts";
 
@@ -46,8 +47,9 @@ interface RunningProcess {
  *
  * The plugin owns the CLI's whole lifetime: spawn on `agent/start`, kill on `agent/stop`. Ora
  * never sees the child's stdio, which is what lets OpenCode use ACP methods this host has never
- * heard of. Nothing here parses ACP; frames are re-framed between Ora's binary envelope and the
- * CLI's NDJSON and otherwise passed through verbatim.
+ * heard of. Without a platform route nothing here parses ACP; frames are re-framed between Ora's
+ * binary envelope and the CLI's NDJSON and otherwise passed through verbatim. With one,
+ * {@link ModelGuard} reads the frames that could change the provider or the model.
  */
 export class OpenCodeClient {
   readonly #spawn: (
@@ -63,6 +65,8 @@ export class OpenCodeClient {
   #expectedExit = false;
   /** The platform route every generation of the CLI starts with; absent on a local host. */
   #route: ModelRoute | undefined;
+  /** Holds every ACP frame of a platform-model execution to its route and model. */
+  #guard: ModelGuard | undefined;
 
   constructor(options: OpenCodeClientOptions = {}) {
     this.#spawn = options.spawn ??
@@ -94,6 +98,7 @@ export class OpenCodeClient {
    */
   useRoute(route: ModelRoute | undefined): void {
     this.#route = route;
+    this.#guard = route === undefined ? undefined : new ModelGuard(route.model);
   }
 
   /**
@@ -138,8 +143,33 @@ export class OpenCodeClient {
    *
    * Awaiting the write is what lets the CLI's backpressure reach the host instead of growing an
    * unbounded queue inside this process.
+   *
+   * On a platform route, every frame from Ora passes the {@link ModelGuard} first: a request that
+   * would replace the provider or the model is answered here with an error and never reaches the
+   * CLI.
    */
   async writeAcp(frame: JsonValue): Promise<void> {
+    const decision = this.#guard?.inbound(frame) ?? { forward: frame };
+    if ("reply" in decision) {
+      log.info(
+        "answered a host ACP request the platform route does not allow",
+        {
+          context: summarize(frame),
+        },
+      );
+      this.#onAcpFrame(decision.reply);
+      return;
+    }
+    if ("drop" in decision) {
+      log.info(
+        "dropped a host ACP notification the platform route does not allow",
+        {
+          context: summarize(frame),
+        },
+      );
+      return;
+    }
+    frame = decision.forward;
     const running = this.#running;
     if (running === undefined) {
       throw new Error("the OpenCode agent is not running");

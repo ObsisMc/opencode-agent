@@ -212,6 +212,13 @@ exact `AgentModelApplied`.
   HTTPS URL without credentials, query or fragment.
 - `OpenCodeClient.useRoute` keeps the route for every later start, so an Effect
   `reactivate` restart runs with the same configuration.
+- The same ACP connection could ask the CLI to leave that provider, so on a
+  route `services/model-guard.ts` answers these requests itself and the CLI
+  never sees them: `authenticate`, `logout`, `auth/*`, `_auth/*`, `providers/*`,
+  and `session/set_model` or the `model` config option for any model but the
+  frozen `ora-model/<id>` (an effort variant of it is allowed). OpenCode 2.0.32
+  serves only `authenticate`, as a no-op; the guard is what keeps a later pin
+  that serves the rest from becoming a way around the route.
 
 ## Process ownership
 

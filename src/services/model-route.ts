@@ -4,6 +4,7 @@ import {
   INVALID_PARAMS,
   PluginMethodError,
 } from "@ora-space/plugin-sdk";
+import type { FrozenModel } from "./model-guard.ts";
 
 /** The one provider this plugin configures; OpenCode addresses models as `<provider>/<id>`. */
 const PROVIDER = "ora-model";
@@ -20,6 +21,8 @@ const TOKEN_VARIABLE = "ORA_MODEL_ACCESS_TOKEN";
  */
 export interface ModelRoute {
   readonly applied: AgentModelApplied;
+  /** The one model this execution may use; every selector and switch is held to it. */
+  readonly model: FrozenModel;
   readonly environment: Readonly<Record<string, string>>;
 }
 
@@ -84,6 +87,7 @@ export function modelRoute(
       declarationFingerprint: configuration.declarationFingerprint,
       configurationRevision: configuration.configurationRevision,
     },
+    model: { id: `${PROVIDER}/${model.id}`, name: model.name },
     environment: {
       OPENCODE_CONFIG_CONTENT: JSON.stringify(config),
       [TOKEN_VARIABLE]: context.token,

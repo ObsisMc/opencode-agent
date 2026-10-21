@@ -1,5 +1,9 @@
 import { assertEquals, assertRejects } from "@std/assert";
-import { type AgentModelContext, INVALID_PARAMS } from "@ora-space/plugin-sdk";
+import {
+  type AgentModelContext,
+  INVALID_PARAMS,
+  type JsonValue,
+} from "@ora-space/plugin-sdk";
 import { startOpenCode } from "../src/handlers/lifecycle.ts";
 import { modelRoute } from "../src/services/model-route.ts";
 import {
@@ -201,6 +205,163 @@ Deno.test("inherited OpenCode configuration variables cannot reach the route", a
   assertEquals(effective.OPENCODE_MODELS_PATH, "");
   await client.stop();
 });
+
+Deno.test("a client cannot re-authenticate or reroute the frozen provider", async () => {
+  const { cli, client, forwarded } = await platformClient();
+  for (
+    const [id, method] of [
+      [11, "authenticate"],
+      [12, "logout"],
+      [13, "providers/set"],
+      [14, "providers/disable"],
+    ] as const
+  ) {
+    await client.writeAcp({ jsonrpc: "2.0", id, method, params: {} });
+  }
+  await client.writeAcp({ jsonrpc: "2.0", method: "providers/disable" });
+  assertEquals(cli.written, []);
+  assertEquals(
+    forwarded.map((frame) => (frame as { id: number }).id),
+    [11, 12, 13, 14],
+  );
+  for (const frame of forwarded) {
+    assertEquals((frame as { error: { code: number } }).error.code, -32601);
+  }
+  await client.stop();
+});
+
+Deno.test("a client can only ever select the frozen model", async () => {
+  const { cli, client, forwarded } = await platformClient();
+  const select = (id: number, value: string): JsonValue => ({
+    jsonrpc: "2.0",
+    id,
+    method: "session/set_config_option",
+    params: { sessionId: "s1", configId: "model", value },
+  });
+  await client.writeAcp(select(1, "openai/gpt-5"));
+  await client.writeAcp({
+    jsonrpc: "2.0",
+    id: 2,
+    method: "session/set_model",
+    params: { sessionId: "s1", modelId: "ora-model/other" },
+  });
+  // The frozen model, also with an effort variant, and every other option reach the CLI.
+  await client.writeAcp(select(3, "ora-model/team/model"));
+  await client.writeAcp(select(4, "ora-model/team/model/high"));
+  await client.writeAcp({
+    jsonrpc: "2.0",
+    id: 5,
+    method: "session/set_config_option",
+    params: { sessionId: "s1", configId: "mode", value: "plan" },
+  });
+  assertEquals(
+    cli.written.map((frame) => (frame as { id: number }).id),
+    [3, 4, 5],
+  );
+  assertEquals(forwarded, [
+    {
+      jsonrpc: "2.0",
+      id: 1,
+      error: {
+        code: -32602,
+        message: "this execution is fixed to the model ora-model/team/model",
+      },
+    },
+    {
+      jsonrpc: "2.0",
+      id: 2,
+      error: {
+        code: -32602,
+        message: "this execution is fixed to the model ora-model/team/model",
+      },
+    },
+  ]);
+  await client.stop();
+});
+
+Deno.test("a local start passes every ACP frame through untouched", async () => {
+  const cli = new ScriptedCli();
+  const client = new OpenCodeClient({ spawn: () => cli.spawn() });
+  await startOpenCode(
+    client,
+    { cwd: "/workspace", hostVersion: "1.0.0" },
+    CONFIG,
+  );
+  const frame = { jsonrpc: "2.0", id: 1, method: "authenticate", params: {} };
+  await client.writeAcp(frame);
+  assertEquals(cli.written, [frame]);
+  await client.stop();
+});
+
+/** A client started on the platform route over a scripted CLI. */
+async function platformClient() {
+  const cli = new ScriptedCli();
+  const forwarded: JsonValue[] = [];
+  const client = new OpenCodeClient({
+    spawn: () => cli.spawn(),
+    onAcpFrame: (frame) => forwarded.push(frame),
+  });
+  await startOpenCode(client, {
+    cwd: "/workspace",
+    hostVersion: "1.0.0",
+    modelContext: context(),
+  }, CONFIG);
+  return { cli, client, forwarded };
+}
+
+/** An `opencode acp` stand-in that records what it is sent and prints what a test tells it to. */
+class ScriptedCli {
+  readonly written: JsonValue[] = [];
+  #stdout: ReadableStreamDefaultController<Uint8Array> | undefined;
+  #stderr: ReadableStreamDefaultController<Uint8Array> | undefined;
+
+  spawn(): SpawnedProcess {
+    let ended: (() => void) | undefined;
+    return {
+      pid: 4321,
+      stdin: new WritableStream<Uint8Array>({
+        write: (chunk) => {
+          for (const line of new TextDecoder().decode(chunk).split("\n")) {
+            if (line.trim() !== "") this.written.push(JSON.parse(line));
+          }
+        },
+      }),
+      stdout: new ReadableStream({
+        start: (controller) => {
+          this.#stdout = controller;
+        },
+      }),
+      stderr: new ReadableStream({
+        start: (controller) => {
+          this.#stderr = controller;
+        },
+      }),
+      exited: new Promise((resolve) => {
+        ended = () => resolve();
+      }),
+      kill: () => {
+        this.#stdout?.close();
+        this.#stderr?.close();
+        ended?.();
+      },
+    };
+  }
+
+  /** Writes one NDJSON frame to stdout. */
+  emit(frame: JsonValue): void {
+    this.emitLine(JSON.stringify(frame));
+  }
+
+  /** Writes one raw line to stdout. */
+  emitLine(line: string): void {
+    this.#stdout?.enqueue(new TextEncoder().encode(`${line}\n`));
+  }
+
+  /** Writes one diagnostic line to stderr. */
+  emitStderr(line: string): void {
+    this.#stderr?.enqueue(new TextEncoder().encode(`${line}\n`));
+  }
+}
 
 /** A `SpawnedProcess` that never speaks and ends when killed. */
 function silentProcess(): SpawnedProcess {
