@@ -389,10 +389,11 @@ the run.
 - `deno task test` runs the tests that need no CLI: `tests/package_test.ts`
   covers packaging and `tests/model_route_test.ts` drives the platform model
   route against a scripted spawn. `tests/host-simulator.ts` drives the plugin
-  the way Ora's host does and needs a real CLI, staged or on PATH. CI runs only
-  `check` and `lint`, deliberately: type checking resolves the whole module
-  graph, so it is also what catches an SDK version that is not published yet,
-  and lint stays meaningful even while that fails.
+  the way Ora's host does and needs a real CLI, staged or on PATH. CI runs
+  `check`, `lint`, `test` and the archive integrity tests, none of which needs a
+  CLI. Type checking resolves the whole module graph, so it is also what catches
+  an SDK version that is not published yet, and lint stays meaningful even while
+  that fails.
 - The SDK is imported from its published JSR package and pinned in `deno.json`;
   keep `deno.lock` synchronized when changing the SDK version.
 - `scripts/package.ts` and `scripts/upstream.ts` know nothing about OpenCode
