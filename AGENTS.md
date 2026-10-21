@@ -202,6 +202,12 @@ exact `AgentModelApplied`.
   project configuration is disabled, so neither the repository's nor the host's
   `opencode.json` can replace the provider. A start whose host provides no
   private configuration root is refused rather than run on the host's own.
+- The spawn environment only adds to what the host inherits, so configuration
+  variables that could reach the provider are overridden rather than removed:
+  `OPENCODE_CONFIG` (one more file to merge), `OPENCODE_MODELS_URL` and
+  `OPENCODE_MODELS_PATH` are set empty, which OpenCode 2.0.32 reads as unset,
+  and `OPENCODE_CONFIG_PROJECT_DISABLE` is set alongside
+  `OPENCODE_DISABLE_PROJECT_CONFIG` because it takes precedence over it.
 - Settings must be empty — this release declares none — and the proxy must be an
   HTTPS URL without credentials, query or fragment.
 - `OpenCodeClient.useRoute` keeps the route for every later start, so an Effect

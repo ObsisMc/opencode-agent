@@ -51,6 +51,10 @@ Deno.test("the frozen model becomes the one OpenCode provider the Node used to w
     ORA_MODEL_ACCESS_TOKEN: TOKEN,
     OPENCODE_CONFIG_DIR: CONFIG,
     OPENCODE_DISABLE_PROJECT_CONFIG: "true",
+    OPENCODE_CONFIG_PROJECT_DISABLE: "true",
+    OPENCODE_CONFIG: "",
+    OPENCODE_MODELS_URL: "",
+    OPENCODE_MODELS_PATH: "",
     OPENCODE_DISABLE_AUTOUPDATE: "true",
     OPENCODE_DISABLE_MODELS_FETCH: "true",
   });
@@ -168,6 +172,34 @@ Deno.test("a platform start without a private configuration root is refused befo
   );
   assertEquals((error as { code?: number }).code, INVALID_PARAMS);
   assertEquals(spawned, 0);
+});
+
+Deno.test("inherited OpenCode configuration variables cannot reach the route", async () => {
+  const inherited = {
+    OPENCODE_CONFIG: "/home/user/elsewhere.json",
+    OPENCODE_CONFIG_PROJECT_DISABLE: "false",
+    OPENCODE_MODELS_URL: "https://models.invalid",
+    OPENCODE_MODELS_PATH: "/home/user/models.json",
+  };
+  const environments: Record<string, string>[] = [];
+  const client = new OpenCodeClient({
+    spawn: (_args, _cwd, env) => {
+      environments.push(env);
+      return silentProcess();
+    },
+  });
+  await startOpenCode(client, {
+    cwd: "/workspace",
+    hostVersion: "1.0.0",
+    modelContext: context(),
+  }, CONFIG);
+  // The host merges the spawn environment over its own, so each inherited value is overridden.
+  const effective = { ...inherited, ...environments[0] };
+  assertEquals(effective.OPENCODE_CONFIG, "");
+  assertEquals(effective.OPENCODE_CONFIG_PROJECT_DISABLE, "true");
+  assertEquals(effective.OPENCODE_MODELS_URL, "");
+  assertEquals(effective.OPENCODE_MODELS_PATH, "");
+  await client.stop();
 });
 
 /** A `SpawnedProcess` that never speaks and ends when killed. */

@@ -89,6 +89,17 @@ export function modelRoute(
       [TOKEN_VARIABLE]: context.token,
       OPENCODE_CONFIG_DIR: configDirectory,
       OPENCODE_DISABLE_PROJECT_CONFIG: "true",
+      // OpenCode reads `OPENCODE_CONFIG_PROJECT_DISABLE ?? OPENCODE_DISABLE_PROJECT_CONFIG`, so an
+      // inherited `OPENCODE_CONFIG_PROJECT_DISABLE=false` would otherwise turn project config
+      // back on.
+      OPENCODE_CONFIG_PROJECT_DISABLE: "true",
+      // The host's spawn environment only adds variables, so inherited ones are cleared by setting
+      // them empty; OpenCode treats an empty value as unset. `OPENCODE_CONFIG` names one more
+      // config file to merge, which could add options to this provider; the models catalog
+      // source could describe it differently.
+      OPENCODE_CONFIG: "",
+      OPENCODE_MODELS_URL: "",
+      OPENCODE_MODELS_PATH: "",
       OPENCODE_DISABLE_AUTOUPDATE: "true",
       OPENCODE_DISABLE_MODELS_FETCH: "true",
     },
