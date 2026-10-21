@@ -1,5 +1,5 @@
 import type { HostProcesses, JsonValue } from "@ora-space/plugin-sdk";
-import { spawnOpenCode } from "./command.ts";
+import { spawnBundledOpenCode, spawnOpenCode } from "./command.ts";
 import { logger } from "./log.ts";
 import { ModelGuard } from "./model-guard.ts";
 import type { ModelRoute } from "./model-route.ts";
@@ -317,7 +317,10 @@ export class OpenCodeClient {
         "OpenCodeClient cannot spawn before attachProcesses() runs",
       );
     }
-    const child = await spawnOpenCode(this.#processes, { args, cwd, env });
+    // A platform route runs only the CLI this package ships; see `spawnBundledOpenCode`.
+    const child = this.#route === undefined
+      ? await spawnOpenCode(this.#processes, { args, cwd, env })
+      : await spawnBundledOpenCode(this.#processes, { args, cwd, env });
     return {
       stdin: new WritableStream<Uint8Array>({
         write: (chunk) => child.write(chunk),

@@ -1,9 +1,14 @@
 import { assertEquals, assertRejects } from "@std/assert";
 import {
+  AGENT_UNUSABLE,
   type AgentModelContext,
+  type HostChildProcessOptions,
+  HostRequestError,
   INVALID_PARAMS,
   type JsonValue,
 } from "@ora-space/plugin-sdk";
+import { bundledBinaryPath } from "../src/services/bundled-binary.ts";
+import { BIN_OVERRIDE_ENV } from "../src/services/command.ts";
 import { startOpenCode } from "../src/handlers/lifecycle.ts";
 import { modelRoute } from "../src/services/model-route.ts";
 import {
@@ -291,6 +296,39 @@ Deno.test("a local start passes every ACP frame through untouched", async () => 
   await client.writeAcp(frame);
   assertEquals(cli.written, [frame]);
   await client.stop();
+});
+
+Deno.test("a platform route spawns only the bundled CLI, ignoring an override and PATH", async () => {
+  const spawns: HostChildProcessOptions[] = [];
+  const client = new OpenCodeClient();
+  client.attachProcesses({
+    spawn: (options) => {
+      spawns.push(options);
+      return Promise.reject(
+        new HostRequestError("package_command_missing", "not in this package"),
+      );
+    },
+  });
+  const previous = Deno.env.get(BIN_OVERRIDE_ENV);
+  Deno.env.set(BIN_OVERRIDE_ENV, "/usr/local/bin/opencode");
+  try {
+    const error = await assertRejects(() =>
+      startOpenCode(client, {
+        cwd: "/workspace",
+        hostVersion: "1.0.0",
+        modelContext: context(),
+      }, CONFIG)
+    );
+    // Not retried as a missing install: the package itself cannot serve a platform route.
+    assertEquals((error as { code?: number }).code, AGENT_UNUSABLE);
+  } finally {
+    if (previous === undefined) Deno.env.delete(BIN_OVERRIDE_ENV);
+    else Deno.env.set(BIN_OVERRIDE_ENV, previous);
+  }
+  assertEquals(spawns.length, 1);
+  assertEquals(spawns[0].packageCommand, bundledBinaryPath());
+  assertEquals(Object.hasOwn(spawns[0], "command"), false);
+  assertEquals(spawns[0].args, ["acp"]);
 });
 
 /** A client started on the platform route over a scripted CLI. */

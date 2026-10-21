@@ -162,6 +162,12 @@ a build-time flag; `bundle.config.ts` picks which one a release is. See
 silently running a different CLI than the one a developer named is worse than
 failing.
 
+A platform model route is the exception to all three: `spawnBundledOpenCode`
+asks the host for the bundled CLI alone — no `ORA_OPENCODE_BIN`, no PATH — and
+fails as `AGENT_UNUSABLE` when the package cannot run it. The route's
+configuration was written for the pinned build, and another version may rank
+configuration sources differently.
+
 `assets/bin/` is git-ignored. It is staged only so `deno task simulate` can run
 against a real binary; released packages have `scripts/package.ts` download the
 CLI per target at package time. With nothing staged there the simulator answers
